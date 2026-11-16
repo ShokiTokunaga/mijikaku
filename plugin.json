@@ -1,0 +1,7 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "mijikaku",
+  "version": "0.1.0",
+  "description": "日本語Markdownの設計書を作成・推敲し、蛇足を削って長文を整理する。",
+  "license": "MIT"
+}
