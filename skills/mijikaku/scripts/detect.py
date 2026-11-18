@@ -2,13 +2,18 @@
 """Markdownの見直し候補・理由・原文の行番号をJSONへ出力する。"""
 import argparse
 from collections import Counter
+from importlib.util import module_from_spec, spec_from_file_location
 import json
 from pathlib import Path
 import re
 
-from markdown_units import extract_units
-
 HERE = Path(__file__).resolve().parent
+# 保存した版や単独コピーも、そのスクリプトと同じ場所の抽出処理を使う。
+_spec = spec_from_file_location("markdown_units", HERE / "markdown_units.py")
+_markdown_units = module_from_spec(_spec)
+_spec.loader.exec_module(_markdown_units)
+extract_units = _markdown_units.extract_units
+
 NOTE_PAIRS = {"（": "）", "(": ")", "【": "】", "［": "］"}
 PAIRS = NOTE_PAIRS | {"「": "」", "『": "』"}
 QUOTED = re.compile(r"""「[^」]*」|『[^』]*』|“[^”]*”|‘[^’]*’|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'""")

@@ -1,5 +1,0 @@
-markdown-it-py==4.3.0
-beautifulsoup4==4.15.0
-mdurl==0.1.2
-soupsieve==4.1
-typing-extensions==4.16.0
