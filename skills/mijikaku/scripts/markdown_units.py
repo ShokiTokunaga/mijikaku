@@ -1,5 +1,5 @@
 """設計書のMarkdownから段落・箇条書き・表セルと原文位置を取り出す。"""
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from html import escape, unescape
 from html.parser import HTMLParser
 import re
@@ -370,7 +370,9 @@ def cells(line):
 
 
 def table_header(line, delimiter):
-    if delimiter is None or "|" not in line or not re.fullmatch(r" {0,3}[:| -]+", delimiter):
+    if delimiter is None or "|" not in line or not re.fullmatch(r" {0,3}[:|-][:| -]+", delimiter):
+        return None
+    if delimiter.lstrip().startswith("- "):
         return None
     row, rules = cells(line), cells(delimiter)
     if len(row) == len(rules) and all(re.fullmatch(r":?-+:?", cell) for cell in rules):
@@ -381,6 +383,20 @@ def table_header(line, delimiter):
 @dataclass
 class InlineText:
     value: str
+    tag: str
+    line: int
+
+    def render(self, references):
+        body = inline(self.value, references)
+        if self.tag:
+            return f'<{self.tag} {SOURCE_ATTR}="{self.line}">{body}</{self.tag}>'
+        return body
+
+
+@dataclass
+class ListLayout:
+    paragraphs: list = field(default_factory=list)
+    loose: bool = False
 
 
 class MarkdownBlocks:
@@ -389,7 +405,9 @@ class MarkdownBlocks:
         self.references = set()
 
     def text_element(self, tag, line, text):
-        self.parts.extend((f'<{tag} {SOURCE_ATTR}="{line}">', InlineText(text), f"</{tag}>"))
+        element = InlineText(text, tag, line)
+        self.parts.append(element)
+        return element
 
     def reference_lines(self, read, first):
         lines = []
@@ -414,13 +432,60 @@ class MarkdownBlocks:
             self.text_element(tag, line, cell)
         self.parts.append("</tr>")
 
-    def blocks(self, read, start=0, depth=0):
+    def list_items(self, read, first, marker, depth):
+        layout = ListLayout()
+        bullet = marker[0][-1]
+        self.parts.append("<ul>")
+        while True:
+            after = read(first)[marker.end():]
+            spaces = len(after) - len(after.lstrip(" "))
+            offset = marker.end() + (spaces if 1 <= spaces <= 4 else 1)
+
+            def item(index, lazy=False):
+                part = read(index, lazy)
+                if part is None:
+                    return None
+                if index == first or part.startswith(" " * offset):
+                    return part[offset:]
+                if not part.strip():
+                    return ""
+                if lazy and not interrupts(part, in_container=True):
+                    return part
+                return None
+
+            self.parts.append(f'<li {SOURCE_ATTR}="{first + 1}">')
+            pos = self.blocks(item, first, depth + 1, layout)
+            self.parts.append("</li>")
+            following = read(pos) or ""
+            marker = ITEM.match(following)
+            if not marker or marker[0][-1] != bullet or RULE.fullmatch(following):
+                break
+            previous = read(pos - 1, lazy=True)
+            if previous is not None and not previous.strip():
+                layout.loose = True
+            first = pos
+        self.parts.append("</ul>")
+        # 空行で区切ったブロック・項目があるときだけ、項目内の段落を改行する。
+        if not layout.loose:
+            for paragraph in layout.paragraphs:
+                paragraph.tag = ""
+        return pos
+
+    def blocks(self, read, start=0, depth=0, layout=None):
         """readは現在の引用・リストに属する行を返す。段落の継続時だけ記号省略を許す。"""
         pos = start
+        has_block = False
         while (line := read(pos)) is not None:
             first = pos
             pos += 1
-            if not line.strip() or line.startswith("    ") or HEADING.match(line) or RULE.fullmatch(line):
+            if not line.strip():
+                continue
+            if layout and has_block:
+                previous = read(first - 1, lazy=True)
+                if previous is not None and not previous.strip():
+                    layout.loose = True
+            has_block = True
+            if line.startswith("    ") or HEADING.match(line) or RULE.fullmatch(line):
                 continue
             if opener := FENCE.fullmatch(line):
                 marker = opener[1] or opener[2]
@@ -449,26 +514,8 @@ class MarkdownBlocks:
                 continue
 
             if marker := ITEM.match(line):
-                after = line[marker.end():]
-                spaces = len(after) - len(after.lstrip(" "))
-                offset = marker.end() + (spaces if 1 <= spaces <= 4 else 1)
-
-                def item(index, lazy=False):
-                    part = read(index, lazy)
-                    if part is None:
-                        return None
-                    if index == first or part.startswith(" " * offset):
-                        return part[offset:]
-                    if not part.strip():
-                        return ""
-                    if lazy and not interrupts(part, in_container=True):
-                        return part
-                    return None
-
                 if depth < 32:
-                    self.parts.append(f'<ul><li {SOURCE_ATTR}="{first + 1}">')
-                    pos = self.blocks(item, first, depth + 1)
-                    self.parts.append("</li></ul>")
+                    pos = self.list_items(read, first, marker, depth)
                 continue
 
             end = raw_end(line)
@@ -487,7 +534,7 @@ class MarkdownBlocks:
                 self.parts.append("<table>")
                 self.table_row("th", first + 1, header)
                 pos += 1
-                while (part := read(pos)) is not None and not interrupts(part) and not part.startswith("    "):
+                while (part := read(pos)) is not None and not interrupts(part, in_container=True) and not part.startswith("    "):
                     row = cells(part)
                     row.extend([""] * (len(header) - len(row)))
                     self.table_row("td", pos + 1, row[:len(header)])
@@ -516,12 +563,14 @@ class MarkdownBlocks:
                 pos += 1
             if not heading:
                 text = "\n".join(part.lstrip(" ") for part in paragraph).strip()
-                self.text_element("p", first + 1, text)
+                paragraph = self.text_element("p", first + 1, text)
+                if layout:
+                    layout.paragraphs.append(paragraph)
         return pos
 
     def render(self):
         # 文末の参照定義も解決できるよう、本文の展開はブロックの確定後に行う。
-        return "\n".join(inline(part.value, self.references) if isinstance(part, InlineText) else part
+        return "\n".join(part.render(self.references) if isinstance(part, InlineText) else part
                          for part in self.parts)
 
 
