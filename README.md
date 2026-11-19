@@ -18,11 +18,7 @@
 
 直接使う場合は、`skills/mijikaku/`を一式保存し、[SKILL.md](skills/mijikaku/SKILL.md)をAIへ渡してください。
 
-## Pythonと依存パッケージの準備
-
-検出ツールにはPython 3.12以上と[依存パッケージ](skills/mijikaku/scripts/requirements.txt)が必要です。
-
-AIが[実行手順](skills/mijikaku/references/detector.md#環境の確認と初回準備)に従い、使用環境に合う専用の仮想環境を準備・再利用します。
+検出ツールはPython 3.12以上の標準ライブラリだけで動作します。[実行手順](skills/mijikaku/references/detector.md)
 
 ## 使用例
 
