@@ -16,7 +16,29 @@ extract_units = _markdown_units.extract_units
 
 NOTE_PAIRS = {"（": "）", "(": ")", "【": "】", "［": "］"}
 PAIRS = NOTE_PAIRS | {"「": "」", "『": "』"}
-QUOTED = re.compile(r"""「[^」]*」|『[^』]*』|“[^”]*”|‘[^’]*’|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'""")
+# 英単語中のアポストロフィは引用の開始・終了に使わない。
+WESTERN_QUOTES = re.compile(
+    r"""“[^”]*”|‘(?:[^’]|(?<=[A-Za-z])’(?=[A-Za-z]))*’"""
+    r"""|"(?:[^"\\]|\\.)*"|(?<![A-Za-z0-9])'(?:[^'\\]|\\.|(?<=[A-Za-z])'(?=[A-Za-z]))*'(?![A-Za-z0-9])"""
+)
+
+
+def quote_ranges(text):
+    """閉じた引用の範囲を返す。かぎ括弧は同じ記号の入れ子にも対応する。"""
+    stack, ranges = [], []
+    for i, char in enumerate(text):
+        if char in "「『":
+            stack.append((PAIRS[char], i))
+        elif stack and char == stack[-1][0]:
+            _, start = stack.pop()
+            ranges.append((start, i + 1))
+    ranges.extend(m.span() for m in WESTERN_QUOTES.finditer(text))
+    end = 0
+    for start, stop in sorted(ranges):
+        if start >= end:
+            yield start, stop
+            end = stop
+
 
 # ID、分類、正規表現、検出理由。
 REGEX_RULES = [
@@ -55,7 +77,7 @@ REGEX_RULES = [
      "語の重なり"),
 ]
 # 単位ごとの表示名、文字数上限、文数上限。
-LIMITS = {"paragraph": ("段落", 240, 3), "table_cell": ("表セル", 120, 2),
+LIMITS = {"paragraph": ("段落", 240, 3),
           "list_item": ("箇条書き", 160, 2)}
 MIN_SENTENCE_CHARACTERS = 60
 
@@ -64,15 +86,17 @@ def decode_source(data):
     return data.decode("utf-8-sig").replace("\r\n", "\n").replace("\r", "\n")
 
 
-def sentences(text):
+def sentences(text, stack=None):
     """引用・括弧内を除く。！？!?で区切る。改行では切らない。"""
-    stack, start = [], 0
+    if stack is None:
+        stack = []
+    start = 0
     for i, char in enumerate(text):
         if char in PAIRS:
             stack.append(char)
         elif stack and char == PAIRS[stack[-1]]:
             stack.pop()
-        if char in "。！？!?" and not stack:
+        if char in "。！？!?" and not stack and not text.startswith("!=", i):
             if any(c.isalnum() or c == "\ufffc" for c in text[start:i + 1]):
                 yield start, i + 1
             start = i + 1
@@ -88,7 +112,8 @@ def notes(text):
         elif char in NOTE_PAIRS.values():
             if stack and char == NOTE_PAIRS[stack[-1][0]]:
                 _, start = stack.pop()
-                if text[start + 1:i].strip():
+                content = text[start + 1:i].rstrip()
+                if content.endswith("。") and any(c.isalnum() or c == "\ufffc" for c in content):
                     yield start, i + 1
             else:
                 stack.clear()
@@ -105,7 +130,6 @@ def trimmed_sentences(text, bounds):
 
 def find_reasons(unit, seen):
     masked, display = unit["masked"], unit["display"]
-    bounds = list(sentences(masked))
     reasons = []
 
     def add(rule_id, group, reason, matches=(), **extra):
@@ -114,20 +138,21 @@ def find_reasons(unit, seen):
         reasons.append({"rule_id": rule_id, "group": group, "reason": reason, **extra})
 
     # 「例：『値』」では、引用中の表現を隠しつつ例の値があることは残す。
-    prose = QUOTED.sub(lambda m: "\ufffc" * len(m[0]), masked)
-    without_quotes = QUOTED.sub(lambda m: " " * len(m[0]), masked)
-    plain_sentences = trimmed_sentences(masked, bounds)
+    prose_chars, unquoted_chars = list(masked), list(masked)
+    for start, stop in quote_ranges(masked):
+        prose_chars[start:stop] = ["\n" if c == "\n" else "\ufffc" for c in masked[start:stop]]
+        unquoted_chars[start:stop] = " " * (stop - start)
+    prose, without_quotes = "".join(prose_chars), "".join(unquoted_chars)
+    bounds = list(sentences(prose))
     prose_sentences = trimmed_sentences(prose, bounds)
     without_quote_sentences = trimmed_sentences(without_quotes, bounds)
     for rule_id, group, pattern, reason in REGEX_RULES:
-        if rule_id in {"前置き-手順", "前置き-例示", "否定-文書範囲", "言い回し-可能表現"}:
-            searchable = prose_sentences
-        elif rule_id == "否定-文末":
+        if rule_id == "否定-文末":
             if unit["kind"] == "table_cell" and display in {"なし", "無し"}:
                 continue
             searchable = without_quote_sentences
         else:
-            searchable = plain_sentences
+            searchable = prose_sentences
         matches = [
             display[offset + match.start():offset + match.end()]
             for offset, segment in searchable
@@ -136,7 +161,7 @@ def find_reasons(unit, seen):
         if matches:
             add(rule_id, group, reason, matches)
 
-    matches = [display[a:b] for a, b in notes(masked)]
+    matches = [display[a:b] for a, b in notes(prose)]
     if matches:
         add("括弧-補足", "括弧書き", "括弧書き", matches)
     matches, previous = [], []
@@ -154,12 +179,20 @@ def find_reasons(unit, seen):
         add("重複-文", "繰り返し", "同文の繰り返し",
             matches, first_seen_lines=sorted(set(previous)))
 
+    if unit["kind"] == "table_cell":
+        stack = []
+        for line, mask in zip(display.split("\n"), prose.split("\n"), strict=True):
+            count = sum(1 for _ in sentences(mask, stack))
+            if count > 1:
+                add("改行-表セル", "文字数・文数", "表セルの同じ行に複数の文", length_text=line,
+                    metrics={"characters": sum(not c.isspace() for c in line), "sentences": count})
+        return reasons
+
     name, max_chars, max_sentences = LIMITS[unit["kind"]]
     chars, count = sum(not c.isspace() for c in display), len(bounds)
     if chars > max_chars or (chars >= MIN_SENTENCE_CHARACTERS and count > max_sentences):
         noun = "箇条書き項目" if unit["kind"] == "list_item" else name
-        add("長さ-" + name, "文字数・文数",
-            "長い" + noun,
+        add("長さ-" + name, "文字数・文数", "長い" + noun,
             metrics={"characters": chars, "sentences": count, "max_characters": max_chars,
                      "max_sentences": max_sentences, "min_characters_for_sentences": MIN_SENTENCE_CHARACTERS})
     return reasons
@@ -212,8 +245,9 @@ def output_candidates(report):
             if matches:
                 excerpt = matches[0] if len(matches) == 1 else matches
             else:
-                excerpt = display[:EXCERPT_CHARACTERS]
-                if len(display) > EXCERPT_CHARACTERS:
+                length_text = reason.get("length_text", display)
+                excerpt = length_text[:EXCERPT_CHARACTERS]
+                if len(length_text) > EXCERPT_CHARACTERS:
                     excerpt += "…"
             candidate = [line, excerpt]
             if "first_seen_lines" in reason:
