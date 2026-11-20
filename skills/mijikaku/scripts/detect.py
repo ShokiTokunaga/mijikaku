@@ -17,7 +17,27 @@ extract_units = _markdown_units.extract_units
 NOTE_PAIRS = {"（": "）", "(": ")", "【": "】", "［": "］"}
 PAIRS = NOTE_PAIRS | {"「": "」", "『": "』"}
 # 英単語中のアポストロフィは引用の開始・終了に使わない。
-QUOTED = re.compile(r"""「[^」]*」|『[^』]*』|“[^”]*”|‘[^’]*’|"(?:[^"\\]|\\.)*"|(?<![A-Za-z0-9])'(?:[^'\\]|\\.)*'(?![A-Za-z0-9])""")
+WESTERN_QUOTES = re.compile(
+    r"""“[^”]*”|‘(?:[^’]|(?<=[A-Za-z])’(?=[A-Za-z]))*’"""
+    r"""|"(?:[^"\\]|\\.)*"|(?<![A-Za-z0-9])'(?:[^'\\]|\\.|(?<=[A-Za-z])'(?=[A-Za-z]))*'(?![A-Za-z0-9])"""
+)
+
+
+def quote_ranges(text):
+    """閉じた引用の範囲を返す。かぎ括弧は同じ記号の入れ子にも対応する。"""
+    stack, ranges = [], []
+    for i, char in enumerate(text):
+        if char in "「『":
+            stack.append((PAIRS[char], i))
+        elif stack and char == stack[-1][0]:
+            _, start = stack.pop()
+            ranges.append((start, i + 1))
+    ranges.extend(m.span() for m in WESTERN_QUOTES.finditer(text))
+    end = 0
+    for start, stop in sorted(ranges):
+        if start >= end:
+            yield start, stop
+            end = stop
 
 
 # ID、分類、正規表現、検出理由。
@@ -118,8 +138,11 @@ def find_reasons(unit, seen):
         reasons.append({"rule_id": rule_id, "group": group, "reason": reason, **extra})
 
     # 「例：『値』」では、引用中の表現を隠しつつ例の値があることは残す。
-    prose = QUOTED.sub(lambda m: re.sub(r"[^\n]", "\ufffc", m[0]), masked)
-    without_quotes = QUOTED.sub(lambda m: " " * len(m[0]), masked)
+    prose_chars, unquoted_chars = list(masked), list(masked)
+    for start, stop in quote_ranges(masked):
+        prose_chars[start:stop] = ["\n" if c == "\n" else "\ufffc" for c in masked[start:stop]]
+        unquoted_chars[start:stop] = " " * (stop - start)
+    prose, without_quotes = "".join(prose_chars), "".join(unquoted_chars)
     bounds = list(sentences(prose))
     prose_sentences = trimmed_sentences(prose, bounds)
     without_quote_sentences = trimmed_sentences(without_quotes, bounds)
