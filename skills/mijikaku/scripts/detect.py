@@ -80,6 +80,7 @@ REGEX_RULES = [
 LIMITS = {"paragraph": ("段落", 240, 3),
           "list_item": ("箇条書き", 160, 2)}
 MIN_SENTENCE_CHARACTERS = 60
+TABLE_CELL_MAX_CHARACTERS = 120
 
 
 def decode_source(data):
@@ -179,17 +180,20 @@ def find_reasons(unit, seen):
         add("重複-文", "繰り返し", "同文の繰り返し",
             matches, first_seen_lines=sorted(set(previous)))
 
+    chars, count = sum(not c.isspace() for c in display), len(bounds)
     if unit["kind"] == "table_cell":
+        if chars > TABLE_CELL_MAX_CHARACTERS:
+            add("長さ-表セル", "文字数・文数", f"表セル全体が{TABLE_CELL_MAX_CHARACTERS}字超",
+                metrics={"characters": chars, "sentences": count, "max_characters": TABLE_CELL_MAX_CHARACTERS})
         stack = []
         for line, mask in zip(display.split("\n"), prose.split("\n"), strict=True):
-            count = sum(1 for _ in sentences(mask, stack))
-            if count > 1:
+            line_count = sum(1 for _ in sentences(mask, stack))
+            if line_count > 1:
                 add("改行-表セル", "文字数・文数", "表セルの同じ行に複数の文", length_text=line,
-                    metrics={"characters": sum(not c.isspace() for c in line), "sentences": count})
+                    metrics={"characters": sum(not c.isspace() for c in line), "sentences": line_count})
         return reasons
 
     name, max_chars, max_sentences = LIMITS[unit["kind"]]
-    chars, count = sum(not c.isspace() for c in display), len(bounds)
     if chars > max_chars or (chars >= MIN_SENTENCE_CHARACTERS and count > max_sentences):
         noun = "箇条書き項目" if unit["kind"] == "list_item" else name
         add("長さ-" + name, "文字数・文数", "長い" + noun,
