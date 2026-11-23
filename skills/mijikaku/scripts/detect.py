@@ -53,7 +53,7 @@ REGEX_RULES = [
      r"(?<!だけ)(?<!のみ)(?:ではなく(?:て)?|(?<!空)でなく(?:て)?|では(?:ないが|ありませんが|ないものの))[、，,]?[ \t]*",
      "否定を伴う対比"),
     ("否定-文書範囲", "否定・対比",
-     rf"(?<=[（(]){OPERATION_SCOPE}(?=[）):：、，])|"
+     rf"(?<=[（(]){OPERATION_SCOPE}(?=[）):：、，,。])|"
      rf"{OPERATION_SCOPE}(?=(?:です|である|とする)?[。．.!?！？\s]*$)|"
      r"(?:本(?:書|設計(?:書)?|文書|章|節)|この(?:文書|設計(?:書)?|章|節))の(?:範囲|対象)外(?:です|である|とする)?[。．.!?！？\s]*$",
      "文書の対象範囲"),
@@ -94,10 +94,21 @@ def decode_source(data):
     return data.decode("utf-8-sig").replace("\r\n", "\n").replace("\r", "\n")
 
 
+# /login?disabled、/受注?状態=処理中、orders?page=1 などのクエリ。
+URL_QUERY = re.compile(
+    r"(?:(?a:/[\w.%~:@+-]*\?(?=[\w%]))"
+    r"|(?:/[\w.%~:@+-]*|(?<=[A-Za-z0-9_]))\?[\w.%~-]+=)"
+    r"(?a:[\w.%~:/@&=+#-]*(?:\?[\w.%~:/@&=+#-]+)*)"
+)
+
+
 def sentences(text, stack=None):
     """引用・括弧内を除く。！？!?で区切る。改行では切らない。"""
     if stack is None:
         stack = []
+    if "?" in text:
+        # 元の位置を保ち、クエリ内の疑問符だけを文の区切りから外す。
+        text = URL_QUERY.sub(lambda m: m[0].replace("?", "_"), text)
     start = 0
     for i, char in enumerate(text):
         if char in PAIRS:
