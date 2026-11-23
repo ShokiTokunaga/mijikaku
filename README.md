@@ -34,4 +34,4 @@
 
 ## ライセンス
 
-[MIT License](LICENSE)
+[MIT No Attribution (MIT-0)](LICENSE)

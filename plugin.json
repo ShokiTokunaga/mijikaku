@@ -3,5 +3,5 @@
   "name": "mijikaku",
   "version": "0.2.5",
   "description": "日本語Markdownの設計書を作成・推敲し、蛇足を削って長文を整理する。",
-  "license": "MIT"
+  "license": "MIT-0"
 }
