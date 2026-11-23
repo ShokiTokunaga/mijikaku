@@ -245,8 +245,12 @@ def scan(source):
     findings = []
     for path in paths:
         findings.extend(scan_text(decode_source(path.read_bytes()), path.relative_to(base).as_posix()))
-    manifest = HERE.parents[2] / "plugin.json"
-    version = json.loads(manifest.read_text(encoding="utf-8")).get("version") if manifest.is_file() else None
+    version = None
+    manifest = HERE.parent.parent.parent / "plugin.json"
+    if HERE.match("skills/*/scripts") and manifest.is_file():
+        plugin = json.loads(manifest.read_text(encoding="utf-8"))
+        if plugin.get("name") == "mijikaku":
+            version = plugin.get("version")
     return {"plugin_version": version, "source": str(source), "findings": findings}
 
 

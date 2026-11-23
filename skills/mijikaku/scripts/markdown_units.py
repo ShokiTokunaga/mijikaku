@@ -66,9 +66,9 @@ def read_unit(node, kind, raw):
             return
         has_link |= tag == "a"
         visible = visible and tag not in SKIP and "hidden" not in child.attrs
-        if visible and (tag == "br" or kind == "list_item" and tag in CONTAINERS):
+        if visible and (tag == "br" or kind in {"list_item", "table_cell"} and tag in CONTAINERS):
             chunks.append((BREAK, False))
-            visible = False
+            return
         block = visible and child is not node and tag in {"p", "div", "li"}
         if block:
             chunks.append((BREAK, False))
