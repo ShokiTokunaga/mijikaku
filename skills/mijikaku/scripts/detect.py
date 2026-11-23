@@ -40,6 +40,10 @@ def quote_ranges(text):
             end = stop
 
 
+# 「基本操作」「そこの処理」などの途中から一致させない。
+OPERATION_SCOPE = (r"(?:(?<![\u3400-\u9fff々])本|(?<![そどこ])この)(?:処理|操作|機能|手順)"
+                   r"(?:の(?:範囲外|対象外)|では(?:不使用|未使用))")
+
 # ID、分類、正規表現、検出理由。
 REGEX_RULES = [
     ("否定-文末", "否定・対比",
@@ -49,6 +53,8 @@ REGEX_RULES = [
      r"(?<!だけ)(?<!のみ)(?:ではなく(?:て)?|(?<!空)でなく(?:て)?|では(?:ないが|ありませんが|ないものの))[、，,]?[ \t]*",
      "否定を伴う対比"),
     ("否定-文書範囲", "否定・対比",
+     rf"(?<=[（(]){OPERATION_SCOPE}(?=[）):：、，,。])|"
+     rf"{OPERATION_SCOPE}(?=(?:です|である|とする)?[。．.!?！？\s]*$)|"
      r"(?:本(?:書|設計(?:書)?|文書|章|節)|この(?:文書|設計(?:書)?|章|節))の(?:範囲|対象)外(?:です|である|とする)?[。．.!?！？\s]*$",
      "文書の対象範囲"),
     ("前置き-補足", "前置き・予告",
@@ -60,6 +66,7 @@ REGEX_RULES = [
     ("前置き-強調", "前置き・予告",
      r"^(?:ここで(?:重要|大切|注意すべき)なのは[、，,]?[ \t]*|(?:重要|大切)な点として[、，,][ \t]*)",
      "強調の前置き"),
+    ("前置き-通常", "前置き・予告", r"通常(?:は|[、，])", "「通常」の適用条件"),
     ("前置き-予告", "前置き・予告",
      r"(?:以下|次)の(?:とおり|通り)(?:です|である|とする)?[。．.!?！？：:」』）)】］ \t]*$",
      "説明の予告"),
@@ -87,10 +94,21 @@ def decode_source(data):
     return data.decode("utf-8-sig").replace("\r\n", "\n").replace("\r", "\n")
 
 
+# /login?disabled、/受注?状態=処理中、orders?page=1 などのクエリ。
+URL_QUERY = re.compile(
+    r"(?:(?a:/[\w.%~:@+-]*\?(?=[\w%]))"
+    r"|(?:/[\w.%~:@+-]*|(?<=[A-Za-z0-9_]))\?[\w.%~-]+=)"
+    r"(?a:[\w.%~:/@&=+#-]*(?:\?[\w.%~:/@&=+#-]+)*)"
+)
+
+
 def sentences(text, stack=None):
     """引用・括弧内を除く。！？!?で区切る。改行では切らない。"""
     if stack is None:
         stack = []
+    if "?" in text:
+        # 元の位置を保ち、クエリ内の疑問符だけを文の区切りから外す。
+        text = URL_QUERY.sub(lambda m: m[0].replace("?", "_"), text)
     start = 0
     for i, char in enumerate(text):
         if char in PAIRS:
@@ -227,8 +245,12 @@ def scan(source):
     findings = []
     for path in paths:
         findings.extend(scan_text(decode_source(path.read_bytes()), path.relative_to(base).as_posix()))
-    manifest = HERE.parents[2] / "plugin.json"
-    version = json.loads(manifest.read_text(encoding="utf-8")).get("version") if manifest.is_file() else None
+    version = None
+    manifest = HERE.parent.parent.parent / "plugin.json"
+    if HERE.match("skills/*/scripts") and manifest.is_file():
+        plugin = json.loads(manifest.read_text(encoding="utf-8"))
+        if plugin.get("name") == "mijikaku":
+            version = plugin.get("version")
     return {"plugin_version": version, "source": str(source), "findings": findings}
 
 

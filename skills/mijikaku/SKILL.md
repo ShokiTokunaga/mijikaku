@@ -1,7 +1,7 @@
 ---
 name: mijikaku
 description: 日本語Markdownの設計書を、蛇足の削除と長文の整理で短く読みやすくする。設計書の作成・短縮・推敲を頼まれたときに使う。
-license: MIT
+license: MIT-0
 ---
 
 # mijikaku

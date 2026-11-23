@@ -12,7 +12,7 @@
 
 | ツール | 導入方法 |
 |---|---|
-| VS Code＋Copilot | [`Chat: Install Plugin from Source`](https://code.visualstudio.com/docs/agent-customization/agent-plugins#install-a-plugin-from-source)に、`https://github.com/ShokiTokunaga/mijikaku`またはこのフォルダを指定します。 |
+| VS Code＋Copilot | [`Chat: Install Plugin from Source`](https://code.visualstudio.com/docs/agent-customization/agent-plugins#_install-a-plugin-from-source)に、`https://github.com/ShokiTokunaga/mijikaku`またはこのフォルダを指定します。 |
 | Copilot CLI | `copilot plugin install ShokiTokunaga/mijikaku`を実行します。[公式手順](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-plugin-reference#plugin-specification-for-install-command) |
 | Codex | [カタログの設定手順](https://developers.openai.com/plugins/build/plugins#marketplace-metadata)に従い、マーケットプレイス経由で導入します。 |
 
@@ -34,4 +34,4 @@
 
 ## ライセンス
 
-[MIT License](LICENSE)
+[MIT No Attribution (MIT-0)](LICENSE)
